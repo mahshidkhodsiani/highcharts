@@ -15,6 +15,12 @@
 
 'use strict';
 
+/* *
+ *
+ *  Imports
+ *
+ * */
+
 import type AreaSeries from '../Series/Area/AreaSeries';
 import type ColumnSeries from '../Series/Column/ColumnSeries';
 import type HeatmapSeries from '../Series/Heatmap/HeatmapSeries';
@@ -47,6 +53,12 @@ const {
     pick,
     wrap
 } = U;
+
+/* *
+ *
+ *  Declarations
+ *
+ * */
 
 declare module '../Core/Series/SeriesLike' {
     interface SeriesLike extends Highcharts.BoostTargetObject {
@@ -108,8 +120,27 @@ declare global {
     }
 }
 
-let CHUNK_SIZE = 50000,
-    destroyLoadingDiv: number;
+/* *
+ *
+ *  Constants
+ *
+ * */
+
+const CHUNK_SIZE = 50000;
+
+/* *
+ *
+ *  Variables
+ *
+ * */
+
+let destroyLoadingDiv: number;
+
+/* *
+ *
+ *  Functions
+ *
+ * */
 
 /* eslint-disable no-invalid-this, valid-jsdoc */
 
@@ -118,7 +149,7 @@ let CHUNK_SIZE = 50000,
  *
  * @function Highcharts.initCanvasBoost
  */
-const initCanvasBoost = function (): void {
+function initCanvasBoost(): void {
     if (H.seriesTypes.heatmap) {
         wrap(H.seriesTypes.heatmap.prototype, 'drawPoints', function (
             this: HeatmapSeries
@@ -188,24 +219,207 @@ const initCanvasBoost = function (): void {
     }
 
 
-    extend(Series.prototype, {
+    Chart.prototype.callbacks.push(function (chart: Chart): void {
+
+        /**
+         * @private
+         */
+        function canvasToSVG(this: Chart): void {
+            if (chart.boostCopy) {
+                chart.boostCopy();
+            }
+        }
+
+        /**
+         * @private
+         */
+        function clear(this: Chart): void {
+            if (chart.renderTarget) {
+                chart.renderTarget.attr({ href: '' });
+            }
+
+            if (chart.canvas) {
+                (chart.canvas.getContext('2d') as any).clearRect(
+                    0,
+                    0,
+                    chart.canvas.width,
+                    chart.canvas.height
+                );
+            }
+        }
+
+        addEvent(chart, 'predraw', clear);
+        addEvent(chart, 'render', canvasToSVG);
+    });
+}
+
+/* *
+ *
+ *  Composition
+ *
+ * */
+
+namespace BoostCanvas {
+
+    /* *
+     *
+     *  Declarations
+     *
+     * */
+
+    export declare class SeriesComposition extends Series {
+        boostCanvas: SeriesAdditions;
+    }
+
+    export declare class AreaSeriesComposition extends SeriesComposition {
+        boostCanvas: AreaSeriesAdditions;
+    }
+
+    export declare class BubbleComposition extends Series {
+        boostCanvas: BubbleSeriesAdditions;
+    }
+
+    export declare class ColumnSeriesComposition extends SeriesComposition {
+        boostCanvas: ColumnSeriesAdditions;
+    }
+
+    export declare class ScatterSeriesComposition extends SeriesComposition {
+        boostCanvas: ScatterSeriesAdditions;
+    }
+
+    /* *
+     *
+     *  Constants
+     *
+     * */
+
+    const composedClasses: Array<Function> = [];
+
+    /* *
+     *
+     *  Functions
+     *
+     * */
+
+    /* eslint-disable valid-jsdoc */
+
+    /**
+     * @private
+     */
+    export function compose<T extends typeof Series>(
+        SeriesClass: T
+    ): (T&typeof SeriesComposition) {
+
+        if (composedClasses.indexOf(SeriesClass) === -1) {
+            composedClasses.push(SeriesClass);
+
+            const seriesProto = SeriesClass.prototype as SeriesComposition;
+
+            seriesProto.boostCanvas = new SeriesAdditions(SeriesClass);
+
+            seriesProto.addBaseSeriesEvents = addBaseSeriesEvents;
+            seriesProto.addEvents = addEvents;
+            seriesProto.destroy = destroy;
+            seriesProto.init = init;
+            seriesProto.setBaseSeries = setBaseSeries;
+        }
+
+        return SeriesClass as (T&typeof SeriesComposition);
+    }
+
+    /* *
+     *
+     *  Classes
+     *
+     * */
+
+    export class SeriesAdditions {
+
+        /* *
+         *
+         *  Constructors
+         *
+         * */
+
+        public constructor(series: SeriesComposition) {
+            this.series = series;
+        }
+
+        /* *
+         *
+         *  Properties
+         *
+         * */
+
+        public cvsStrokeBatch?: number;
+
+        public fill?: boolean;
+
+        public series: SeriesComposition;
+
+        /* *
+         *
+         *  Functions
+         *
+         * */
+
+        /**
+         * Draw the canvas image inside an SVG image
+         */
+        public canvasToSVG(): void {
+            const series = this.series;
+
+            if (!series.chart.isChartSeriesBoosting()) {
+                if (series.boostCopy || series.chart.boostCopy) {
+                    (series.boostCopy || series.chart.boostCopy)();
+                }
+            } else {
+                if (series.boostClear) {
+                    series.boostClear();
+                }
+            }
+        }
+
+        public cvsDrawPoint?(
+            ctx: CanvasRenderingContext2D,
+            clientX: number,
+            plotY: number,
+            yBottom: number,
+            lastPoint?: Record<string, number>
+        ): void;
+
+        public cvsLineTo(
+            ctx: CanvasRenderingContext2D,
+            clientX: number,
+            plotY: number
+        ): void {
+            ctx.lineTo(clientX, plotY);
+        }
+
+        public cvsMarkerCircle?(
+            ctx: CanvasRenderingContext2D,
+            clientX: number,
+            plotY: number,
+            r: number,
+            i?: number
+        ): void;
+
+        public cvsMarkerSquare?(
+            ctx: CanvasRenderingContext2D,
+            clientX: number,
+            plotY: number,
+            r: number
+        ): void;
 
         /**
          * Create a hidden canvas to draw the graph on. The contents is later
          * copied over to an SVG image element.
-         *
-         * @private
-         * @function Highcharts.Series#getContext
          */
-        getContext: function (
-            this: Series
-        ): (CanvasRenderingContext2D|null|undefined) {
-            let chart = this.chart,
+        public getContext(): (CanvasRenderingContext2D|null|undefined) {
+            const series = this.series,
+                chart = series.chart,
                 width = chart.chartWidth,
                 height = chart.chartHeight,
-                targetGroup = chart.seriesGroup || this.group,
-                target: Highcharts.BoostTargetObject = this,
-                ctx: (CanvasRenderingContext2D|null|undefined),
                 swapXY = function (
                     this: CanvasRenderingContext2D,
                     proceed: Function,
@@ -218,6 +432,10 @@ const initCanvasBoost = function (): void {
                 ): void {
                     proceed.call(this, y, x, a, b, c, d);
                 };
+
+            let targetGroup = chart.seriesGroup || series.group,
+                target: Highcharts.BoostTargetObject = series,
+                ctx: (CanvasRenderingContext2D|null|undefined);
 
             if (chart.isChartSeriesBoosting()) {
                 target = chart as any;
@@ -291,41 +509,14 @@ const initCanvasBoost = function (): void {
             (target.boostClipRect as any).attr(chart.getBoostClipRect(target));
 
             return ctx;
-        },
+        }
 
-        /**
-         * Draw the canvas image inside an SVG image
-         *
-         * @private
-         * @function Highcharts.Series#canvasToSVG
-         */
-        canvasToSVG: function (this: Series): void {
-            if (!this.chart.isChartSeriesBoosting()) {
-                if (this.boostCopy || this.chart.boostCopy) {
-                    (this.boostCopy || this.chart.boostCopy)();
-                }
-            } else {
-                if (this.boostClear) {
-                    this.boostClear();
-                }
-            }
-        },
-
-        cvsLineTo: function (
-            this: Series,
-            ctx: CanvasRenderingContext2D,
-            clientX: number,
-            plotY: number
-        ): void {
-            ctx.lineTo(clientX, plotY);
-        },
-
-        renderCanvas: function (this: Series): void {
-            let series = this,
+        public renderCanvas(): void {
+            let series = this.series,
                 options = series.options,
                 chart = series.chart,
-                xAxis = this.xAxis,
-                yAxis = this.yAxis,
+                xAxis = series.xAxis,
+                yAxis = series.yAxis,
                 activeBoostSettings = chart.options.boost || {},
                 boostSettings = {
                     timeRendering: activeBoostSettings.timeRendering || false,
@@ -515,13 +706,13 @@ const initCanvasBoost = function (): void {
                     }
                 };
 
-            if (this.renderTarget) {
-                this.renderTarget.attr({ 'href': '' });
+            if (series.renderTarget) {
+                series.renderTarget.attr({ 'href': '' });
             }
 
             // If we are zooming out from SVG mode, destroy the graphics
-            if (this.points || this.graph) {
-                this.destroyGraphics();
+            if (series.points || series.graph) {
+                series.destroyGraphics();
             }
 
             // The group
@@ -539,12 +730,12 @@ const initCanvasBoost = function (): void {
                 series.markerGroup = null as any;
             });
 
-            points = this.points = [];
+            points = series.points = [];
             ctx = this.getContext();
             series.buildKDTree = noop; // Do not start building while drawing
 
-            if (this.boostClear) {
-                this.boostClear();
+            if (series.boostClear) {
+                series.boostClear();
             }
 
             // if (this.canvas) {
@@ -556,7 +747,7 @@ const initCanvasBoost = function (): void {
             //     );
             // }
 
-            if (!this.visible) {
+            if (!series.visible) {
                 return;
             }
 
@@ -773,53 +964,30 @@ const initCanvasBoost = function (): void {
             // getSVG methods are not chained for it.
             }, chart.renderer.forExport ? Number.MAX_VALUE : void 0);
         }
-    });
 
-    seriesTypes.scatter.prototype.cvsMarkerCircle = function (
-        ctx: CanvasRenderingContext2D,
-        clientX: number,
-        plotY: number,
-        r: number
-    ): void {
-        ctx.moveTo(clientX, plotY);
-        ctx.arc(clientX, plotY, r, 0, 2 * Math.PI, false);
-    };
-
-    // Rect is twice as fast as arc, should be used for small markers
-    seriesTypes.scatter.prototype.cvsMarkerSquare = function (
-        ctx: CanvasRenderingContext2D,
-        clientX: number,
-        plotY: number,
-        r: number
-    ): void {
-        ctx.rect(clientX - r, plotY - r, r * 2, r * 2);
-    };
-    seriesTypes.scatter.prototype.fill = true;
-
-    if (seriesTypes.bubble) {
-        seriesTypes.bubble.prototype.cvsMarkerCircle = function (
-            ctx: CanvasRenderingContext2D,
-            clientX: number,
-            plotY: number,
-            r: number,
-            i?: number
-        ): void {
-            ctx.moveTo(clientX, plotY);
-            ctx.arc(
-                clientX,
-                plotY,
-                this.radii && (this.radii[i as any] as any),
-                0,
-                2 * Math.PI,
-                false
-            );
-        };
-        seriesTypes.bubble.prototype.cvsStrokeBatch = 1;
     }
 
-    extend(seriesTypes.area.prototype, {
-        cvsDrawPoint: function (
-            this: AreaSeries,
+    export class AreaSeriesAdditions extends SeriesAdditions {
+
+        /* *
+         *
+         *  Properties
+         *
+         * */
+
+        public fill = true;
+
+        public fillOpacity = true;
+
+        public sampling = true;
+
+        /* *
+         *
+         *  Functions
+         *
+         * */
+
+        public cvsDrawPoint(
             ctx: CanvasRenderingContext2D,
             clientX: number,
             plotY: number,
@@ -832,58 +1000,123 @@ const initCanvasBoost = function (): void {
                 ctx.lineTo(clientX, plotY);
                 ctx.lineTo(clientX, yBottom);
             }
-        },
-        fill: true,
-        fillOpacity: true,
-        sampling: true
-    });
+        }
 
-    extend(seriesTypes.column.prototype, {
-        cvsDrawPoint: function (
-            this: ColumnSeries,
+    }
+
+    export class BubbleSeriesAdditions extends SeriesAdditions {
+
+        /* *
+         *
+         *  Properties
+         *
+         * */
+
+        public cvsStrokeBatch = 1;
+
+        /* *
+         *
+         *  Functions
+         *
+         * */
+
+        public cvsMarkerCircle(
+            ctx: CanvasRenderingContext2D,
+            clientX: number,
+            plotY: number,
+            r: number,
+            i?: number
+        ): void {
+            const series = this.series;
+
+            ctx.moveTo(clientX, plotY);
+            ctx.arc(
+                clientX,
+                plotY,
+                series.radii && (series.radii[i as any] as any),
+                0,
+                2 * Math.PI,
+                false
+            );
+        }
+
+    }
+
+    export class ColumnSeriesAdditions extends SeriesAdditions {
+
+        /* *
+         *
+         *  Properties
+         *
+         * */
+
+        public fill = true;
+
+        public sampling = true;
+
+        /* *
+         *
+         *  Functions
+         *
+         * */
+
+        public cvsDrawPoint(
             ctx: CanvasRenderingContext2D,
             clientX: number,
             plotY: number,
             yBottom: number
         ): void {
             ctx.rect(clientX - 1, plotY, 1, yBottom - plotY);
-        },
-        fill: true,
-        sampling: true
-    });
+        }
 
-    Chart.prototype.callbacks.push(function (chart: Chart): void {
+    }
 
-        /**
-         * @private
-         */
-        function canvasToSVG(this: Chart): void {
-            if (chart.boostCopy) {
-                chart.boostCopy();
-            }
+    export class ScatterSeriesAdditions extends SeriesAdditions {
+
+        /* *
+         *
+         *  Properties
+         *
+         * */
+
+        public fill = true;
+
+        /* *
+         *
+         *  Functions
+         *
+         * */
+
+        public cvsMarkerCircle(
+            ctx: CanvasRenderingContext2D,
+            clientX: number,
+            plotY: number,
+            r: number
+        ): void {
+            ctx.moveTo(clientX, plotY);
+            ctx.arc(clientX, plotY, r, 0, 2 * Math.PI, false);
         }
 
         /**
-         * @private
+         * Rect is twice as fast as arc, should be used for small markers.
          */
-        function clear(this: Chart): void {
-            if (chart.renderTarget) {
-                chart.renderTarget.attr({ href: '' });
-            }
-
-            if (chart.canvas) {
-                (chart.canvas.getContext('2d') as any).clearRect(
-                    0,
-                    0,
-                    chart.canvas.width,
-                    chart.canvas.height
-                );
-            }
+        public cvsMarkerSquare(
+            ctx: CanvasRenderingContext2D,
+            clientX: number,
+            plotY: number,
+            r: number
+        ): void {
+            ctx.rect(clientX - r, plotY - r, r * 2, r * 2);
         }
 
-        addEvent(chart, 'predraw', clear);
-        addEvent(chart, 'render', canvasToSVG);
-    });
-};
+    }
+
+}
+
+/* *
+ *
+ *  Default Export
+ *
+ * */
 
 export default initCanvasBoost;
