@@ -35,7 +35,7 @@ We will start off by creating a simple bar chart.
                     data: [1, 0, 4]
                 }, {
                     name: 'John',
-                    data: [5, 7, 3]
+                    data: [5, 0, 3]
                 }]
             });
         });
